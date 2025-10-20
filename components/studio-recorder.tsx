@@ -32,23 +32,57 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
   const [recordingTime, setRecordingTime] = useState(0)
   const [showDraft, setShowDraft] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [transcript, setTranscript] = useState("")
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
 
   const router = useRouter()
   const { toast } = useToast()
 
   useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      recognitionRef.current = new SpeechRecognition()
+      recognitionRef.current.continuous = true
+      recognitionRef.current.interimResults = true
+      recognitionRef.current.lang = 'en-US'
+      
+      recognitionRef.current.onresult = (event) => {
+        let finalTranscript = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' '
+          }
+        }
+        setTranscript(prev => prev + finalTranscript)
+      }
+      
+      recognitionRef.current.onerror = (event) => {
+        if (event.error === 'not-allowed') {
+          toast({
+            title: "Microphone Permission Required",
+            description: "Please allow microphone access for speech recognition.",
+            variant: "destructive",
+          })
+        }
+      }
+    }
+
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
       }
       if (timerRef.current) {
         clearInterval(timerRef.current)
+      }
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
       }
     }
   }, [])
@@ -62,7 +96,13 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
         videoRef.current.srcObject = stream
       }
 
-      const mediaRecorder = new MediaRecorder(stream)
+      const mimeType = [
+        "video/webm;codecs=vp9",
+        "video/webm", 
+        "video/mp4"
+      ].find(type => MediaRecorder.isTypeSupported(type)) || "video/webm"
+      
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
 
@@ -73,17 +113,24 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
       }
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "video/webm" })
+        const blob = new Blob(chunksRef.current, { type: mimeType })
         setRecordedBlob(blob)
         if (videoRef.current) {
           videoRef.current.srcObject = null
           videoRef.current.src = URL.createObjectURL(blob)
+          videoRef.current.load()
+          videoRef.current.play().catch(() => {})
         }
       }
 
       mediaRecorder.start()
       setIsRecording(true)
       setRecordingTime(0)
+      setTranscript("")
+
+      if (recognitionRef.current) {
+        recognitionRef.current.start()
+      }
 
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1)
@@ -103,6 +150,10 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
       mediaRecorderRef.current.stop()
       setIsRecording(false)
 
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
       }
@@ -120,7 +171,6 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
     const supabase = createClient()
 
     try {
-      // Create attempt record (without video storage for now)
       const { data: attempt, error } = await supabase
         .from("attempts")
         .insert({
@@ -128,8 +178,8 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
           question_id: question.id,
           draft_id: draft?.id || null,
           duration: recordingTime,
-          transcript: null, // Will be filled by AI processing
-          feedback: null, // Will be filled by AI processing
+          transcript: transcript.trim() || "No transcript available",
+          feedback: null,
         })
         .select()
         .single()
@@ -138,10 +188,9 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
 
       toast({
         title: "Recording submitted",
-        description: "Your practice session has been saved. Processing feedback...",
+        description: "Your practice session has been saved with transcript.",
       })
 
-      // Redirect to review page where AI processing will happen
       router.push(`/studio/${question.id}/review/${attempt.id}`)
     } catch (error) {
       console.error("Error submitting recording:", error)
@@ -192,7 +241,9 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
                     ref={videoRef}
                     autoPlay
                     playsInline
+                    controls={!isRecording && recordedBlob}
                     muted={isRecording}
+                    preload="metadata"
                     className="w-full h-full object-cover"
                   />
                   {isRecording && (
@@ -204,6 +255,7 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
                 </div>
               </CardContent>
             </Card>
+
 
             {/* Controls */}
             <div className="flex gap-4 justify-center">
@@ -226,7 +278,7 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
                     Re-record
                   </Button>
                   <Button onClick={submitRecording} size="lg" disabled={isProcessing} className="gap-2">
-                    {isProcessing ? "Processing..." : "Submit & Get Feedback"}
+                    {isProcessing ? "Saving..." : "Submit Recording"}
                   </Button>
                 </>
               )}

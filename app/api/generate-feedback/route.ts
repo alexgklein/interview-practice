@@ -4,10 +4,8 @@ import { NextResponse } from "next/server"
 export async function POST(request: Request) {
   try {
     const { attemptId, questionTitle, draft } = await request.json()
-
     const supabase = await createClient()
 
-    // Get the user
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -15,11 +13,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Simulate transcript generation (in production, use speech-to-text API)
-    const mockTranscript = `In my software engineering class, our team disagreed about which language to use for our project. As team lead, I needed to resolve this disagreement and keep the project on track. I scheduled a meeting where each person could present their case, and I facilitated a discussion about the pros and cons of each option. We evaluated based on our team's skills and project requirements. The conflict de-escalated, and we chose Python because it matched our team's strengths. We completed the project successfully and received an A grade.`
+    const { data: attemptData, error: attemptError } = await supabase
+      .from("attempts")
+      .select("transcript")
+      .eq("id", attemptId)
+      .eq("user_id", user.id)
+      .single()
 
-    // Generate AI feedback using the AI SDK
-    const { generateText } = await import("ai")
+    if (attemptError) {
+      return NextResponse.json({ error: "Attempt not found" }, { status: 404 })
+    }
+
+    const transcript = attemptData?.transcript || "No transcript available"
+
+    if (!process.env.GOOGLE_AI_API_KEY) {
+      return NextResponse.json({ error: "API key not configured" }, { status: 500 })
+    }
+
+    const { GoogleGenerativeAI } = await import("@google/generative-ai")
+    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY)
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
 
     const draftContext = draft
       ? `
@@ -31,18 +44,16 @@ Result: ${draft.result || "Not provided"}
 `
       : ""
 
-    const { text } = await generateText({
-      model: "openai/gpt-4o-mini",
-      prompt: `You are an expert interview coach evaluating a behavioral interview response.
+    const prompt = `You are an expert interview coach evaluating a behavioral interview response.
 
 Question: "${questionTitle}"
 
 ${draftContext}
 
 Candidate's spoken response (transcript):
-"${mockTranscript}"
+"${transcript}"
 
-Provide detailed feedback in the following JSON format:
+Provide detailed feedback in the following JSON format. IMPORTANT: Do not use any markdown formatting, asterisks, bold text, or special characters. Use plain text only:
 {
   "overall": "A brief overall assessment (2-3 sentences)",
   "star": {
@@ -52,7 +63,13 @@ Provide detailed feedback in the following JSON format:
     "result": "Feedback on the result component"
   },
   "strengths": ["strength 1", "strength 2", "strength 3"],
-  "improvements": ["improvement 1", "improvement 2", "improvement 3"]
+  "improvements": {
+    "specificity": "Feedback about adding more specific details and examples",
+    "quantification": "Feedback about including numbers, metrics, and measurable results",
+    "structure": "Feedback about STAR structure and organization",
+    "relevance": "Feedback about staying focused on the question asked",
+    "communication": "Feedback about clarity and articulation"
+  }
 }
 
 Focus on:
@@ -60,42 +77,44 @@ Focus on:
 - Specificity and detail
 - Relevance to the question
 - Communication clarity
-- Quantifiable results`,
-    })
+- Quantifiable results
 
-    // Parse the AI response
+Return only valid JSON with no markdown formatting, no asterisks, no bold text, and no special characters.`
+
+    const result = await model.generateContent(prompt)
+    const text = result.response.text()
+
     let feedback
     try {
-      feedback = JSON.parse(text)
-    } catch {
-      // Fallback if AI doesn't return valid JSON
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      const jsonString = jsonMatch ? jsonMatch[0] : text
+      feedback = JSON.parse(jsonString)
+    } catch (error) {
       feedback = {
-        overall:
-          "Your response demonstrates good structure and addresses the question. Consider adding more specific details and quantifiable results.",
+        overall: "Your response shows good effort. Consider adding more specific details and quantifiable results.",
         star: {
-          situation: "Clearly described the context and background",
-          task: "Identified your responsibility as team lead",
-          action: "Explained specific steps taken to resolve the conflict",
-          result: "Mentioned positive outcome with grade received",
+          situation: "Context could be more specific",
+          task: "Your role and responsibilities were mentioned",
+          action: "Steps taken were described",
+          result: "Outcome was mentioned",
         },
         strengths: [
-          "Clear STAR structure throughout the response",
-          "Demonstrated leadership and conflict resolution skills",
-          "Included a measurable outcome (A grade)",
+          "Attempted to follow STAR structure",
+          "Addressed the question asked",
         ],
-        improvements: [
-          "Add more specific details about the disagreement",
-          "Elaborate on the facilitation techniques used",
-          "Include more metrics about project success beyond the grade",
-        ],
+        improvements: {
+          specificity: "Add more specific details and examples",
+          quantification: "Include quantifiable results and metrics",
+          structure: "Better organize your response using STAR format",
+          relevance: "Stay focused on the specific question asked",
+          communication: "Speak more clearly and avoid filler words"
+        },
       }
     }
 
-    // Update the attempt with transcript and feedback
     const { error: updateError } = await supabase
       .from("attempts")
       .update({
-        transcript: mockTranscript,
         feedback: feedback,
       })
       .eq("id", attemptId)
@@ -104,11 +123,14 @@ Focus on:
     if (updateError) throw updateError
 
     return NextResponse.json({
-      transcript: mockTranscript,
+      transcript: transcript,
       feedback: feedback,
     })
   } catch (error) {
     console.error("Error generating feedback:", error)
-    return NextResponse.json({ error: "Failed to generate feedback" }, { status: 500 })
+    return NextResponse.json({ 
+      error: "Failed to generate feedback", 
+      details: error instanceof Error ? error.message : "Unknown error"
+    }, { status: 500 })
   }
 }

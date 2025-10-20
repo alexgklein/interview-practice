@@ -36,8 +36,7 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
   const { toast } = useToast()
 
   useEffect(() => {
-    // If no transcript or feedback, generate them
-    if (!attempt.transcript || !attempt.feedback) {
+    if (!attempt.feedback) {
       generateFeedback()
     }
   }, [])
@@ -56,7 +55,10 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
         }),
       })
 
-      if (!response.ok) throw new Error("Failed to generate feedback")
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(`Failed to generate feedback: ${errorData.error || response.statusText}`)
+      }
 
       const data = await response.json()
       setTranscript(data.transcript)
@@ -70,7 +72,7 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
       console.error("Error generating feedback:", error)
       toast({
         title: "Error",
-        description: "Failed to generate feedback. Please try again.",
+        description: `Failed to generate feedback: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive",
       })
     } finally {
@@ -118,7 +120,7 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
             </Card>
           )}
 
-          {!isGenerating && (transcript || feedback) && (
+          {(transcript || feedback) && (
             <div className="grid lg:grid-cols-3 gap-6">
               {/* Main Content Area */}
               <div className="lg:col-span-2 space-y-6">
@@ -191,12 +193,23 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
                           <CardHeader>
                             <CardTitle>Areas for Improvement</CardTitle>
                           </CardHeader>
-                          <CardContent>
-                            <ul className="list-disc list-inside space-y-2 text-sm text-muted-foreground">
-                              {feedback.improvements?.map((improvement: string, i: number) => (
-                                <li key={i}>{improvement}</li>
-                              )) || <li>No improvements suggested</li>}
-                            </ul>
+                          <CardContent className="space-y-4">
+                            {feedback.improvements && typeof feedback.improvements === 'object' ? (
+                              Object.entries(feedback.improvements).map(([key, value]) => (
+                                <div key={key}>
+                                  <h4 className="font-medium mb-1 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</h4>
+                                  <p className="text-sm text-muted-foreground">
+                                    {value}
+                                  </p>
+                                </div>
+                              ))
+                            ) : (
+                              <ul className="list-disc list-inside space-y-2 text-sm text-muted-foreground">
+                                {feedback.improvements?.map((improvement: string, i: number) => (
+                                  <li key={i}>{improvement}</li>
+                                )) || <li>No improvements suggested</li>}
+                              </ul>
+                            )}
                           </CardContent>
                         </Card>
                       </>
