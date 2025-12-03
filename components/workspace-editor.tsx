@@ -4,7 +4,6 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { Save } from "lucide-react"
@@ -41,7 +40,16 @@ export function WorkspaceEditor({ question, draft, userId }: { question: Questio
   const router = useRouter()
   const { toast } = useToast()
 
-  const handleSave = async () => {
+  const hasUnsavedChanges = () => {
+    return (
+      situation !== (draft?.situation || "") ||
+      task !== (draft?.task || "") ||
+      action !== (draft?.action || "") ||
+      result !== (draft?.result || "")
+    )
+  }
+
+  const handleSave = async (showToast = true) => {
     setIsSaving(true)
     const supabase = createClient()
 
@@ -72,10 +80,12 @@ export function WorkspaceEditor({ question, draft, userId }: { question: Questio
         if (error) throw error
       }
 
-      toast({
-        title: "Draft saved",
-        description: "Your response has been saved successfully.",
-      })
+      if (showToast) {
+        toast({
+          title: "Draft saved",
+          description: "Your response has been saved successfully.",
+        })
+      }
       router.refresh()
     } catch (error) {
       console.error("Error saving draft:", error)
@@ -84,9 +94,21 @@ export function WorkspaceEditor({ question, draft, userId }: { question: Questio
         description: "Failed to save draft. Please try again.",
         variant: "destructive",
       })
+      throw error
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const handlePractice = async () => {
+    if (hasUnsavedChanges()) {
+      try {
+        await handleSave(false)
+      } catch (error) {
+        return
+      }
+    }
+    router.push(`/studio/${question.id}`)
   }
 
   return (
@@ -232,12 +254,17 @@ export function WorkspaceEditor({ question, draft, userId }: { question: Questio
             </div>
           </div>
           <div className="flex gap-2 mt-6">
-             <Button onClick={handleSave} disabled={isSaving} size="sm" className="cursor-pointer">
+             <Button onClick={() => handleSave(true)} disabled={isSaving} size="sm" className="cursor-pointer">
               <Save className="h-4 w-4 mr-2" />
               {isSaving ? "Saving..." : "Save"}
             </Button>
-            <Button variant="outline" asChild size="sm">
-              <Link href={`/studio/${question.id}`}>Practice</Link>
+            <Button 
+              variant="outline" 
+              onClick={handlePractice} 
+              disabled={isSaving}
+              size="sm"
+            >
+              Practice
             </Button>
           </div>
         </div>

@@ -29,7 +29,9 @@ type Draft = {
 export function StudioRecorder({ question, draft, userId }: { question: Question; draft: Draft; userId: string }) {
   const [isRecording, setIsRecording] = useState(false)
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
-  const [recordingTime, setRecordingTime] = useState(0)
+  const [recordingTime, setRecordingTime] = useState(0) 
+  const [countdownTime, setCountdownTime] = useState(0)
+  const [selectedDuration, setSelectedDuration] = useState<number | null>(null)
   const [showDraft, setShowDraft] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
   const [transcript, setTranscript] = useState("")
@@ -132,8 +134,36 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
         recognitionRef.current.start()
       }
 
+      const durationSeconds = (selectedDuration || 5) * 60
+      setCountdownTime(durationSeconds)
+      setRecordingTime(0)
+
+      const startTime = Date.now()
       timerRef.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1)
+        const elapsed = Math.floor((Date.now() - startTime) / 1000)
+        setRecordingTime(elapsed)
+        
+        const remaining = durationSeconds - elapsed
+        setCountdownTime(Math.max(0, remaining))
+        
+        if (remaining <= 0) {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop()
+            setIsRecording(false)
+
+            if (recognitionRef.current) {
+              recognitionRef.current.stop()
+            }
+
+            if (streamRef.current) {
+              streamRef.current.getTracks().forEach((track) => track.stop())
+            }
+
+            if (timerRef.current) {
+              clearInterval(timerRef.current)
+            }
+          }
+        }
       }, 1000)
     } catch (error) {
       console.error("Error starting recording:", error)
@@ -161,6 +191,8 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
+      
+      setCountdownTime(0)
     }
   }
 
@@ -210,6 +242,8 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
     return `${mins}:${String(secs).padStart(2, "0")}`
   }
 
+  const durationOptions = [1, 2, 3, 5, 10]
+
   return (
     <div className="min-h-screen bg-background container mx-auto px-6 py-8">
       {/* Main Content */}
@@ -231,39 +265,80 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
+        <div className="grid lg:grid-cols-3 gap-6 items-start">
           {/* Video Recording Area */}
           <div className="lg:col-span-2 space-y-4">
-            <Card>
-              <CardContent className="p-0">
-                <div className="relative bg-black aspect-video rounded-lg overflow-hidden">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    controls={!isRecording && recordedBlob}
-                    muted={isRecording}
-                    preload="metadata"
-                    className="w-full h-full object-cover"
-                  />
-                  {isRecording && (
-                    <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2">
-                      <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
-                      {formatTime(recordingTime)}
+            {/* Duration Selector */}
+            {!isRecording && !recordedBlob && selectedDuration === null && (
+              <Card className="border-2 border-dashed mt-[52px]">
+                <CardContent className="p-6">
+                  <div className="text-center space-y-4">
+                    <h3 className="text-lg font-semibold">Select Recording Duration</h3>
+                    <p className="text-sm text-muted-foreground">Choose how long you want to record your response</p>
+                    <div className="flex flex-wrap gap-3 justify-center mt-6">
+                      {durationOptions.map((minutes) => (
+                        <Button
+                          key={minutes}
+                          onClick={() => setSelectedDuration(minutes)}
+                          variant="outline"
+                          size="lg"
+                          className="min-w-[80px] h-14 text-base font-medium hover:bg-primary hover:text-primary-foreground transition-all"
+                        >
+                          {minutes} {minutes === 1 ? 'min' : 'mins'}
+                        </Button>
+                      ))}
                     </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
+            {/* Video Card - Only shown after duration is selected */}
+            {selectedDuration !== null && (
+              <Card>
+                <CardContent className="p-0">
+                  <div className="relative bg-black aspect-video rounded-lg overflow-hidden">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      controls={!isRecording && recordedBlob}
+                      muted={isRecording}
+                      preload="metadata"
+                      className="w-full h-full object-cover"
+                    />
+                    {isRecording && (
+                      <div className="absolute top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-full text-base font-semibold flex items-center gap-2 shadow-lg">
+                        <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
+                        {formatTime(countdownTime)}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Controls */}
             <div className="flex gap-4 justify-center">
-              {!isRecording && !recordedBlob && (
-                <Button onClick={startRecording} size="lg" className="gap-2">
-                  <Video className="h-5 w-5" />
-                  Start Recording
-                </Button>
+              {!isRecording && !recordedBlob && selectedDuration !== null && (
+                <>
+                  <Button 
+                    onClick={() => setSelectedDuration(null)} 
+                    size="lg" 
+                    variant="outline"
+                    className="gap-2"
+                  >
+                    Change Duration
+                  </Button>
+                  <Button 
+                    onClick={startRecording} 
+                    size="lg" 
+                    className="gap-2"
+                  >
+                    <Video className="h-5 w-5" />
+                    Start Recording ({selectedDuration} {selectedDuration === 1 ? 'min' : 'mins'})
+                  </Button>
+                </>
               )}
               {isRecording && (
                 <Button onClick={stopRecording} size="lg" variant="destructive" className="gap-2">
@@ -273,7 +348,17 @@ export function StudioRecorder({ question, draft, userId }: { question: Question
               )}
               {recordedBlob && !isRecording && (
                 <>
-                  <Button onClick={startRecording} size="lg" variant="outline" className="gap-2 bg-transparent">
+                  <Button 
+                    onClick={() => {
+                      setRecordedBlob(null)
+                      setSelectedDuration(null)
+                      setRecordingTime(0)
+                      setCountdownTime(0)
+                    }} 
+                    size="lg" 
+                    variant="outline" 
+                    className="gap-2 bg-transparent"
+                  >
                     <Video className="h-5 w-5" />
                     Re-record
                   </Button>

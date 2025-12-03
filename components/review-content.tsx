@@ -237,32 +237,32 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
                 {draft ? (
                   <div className="space-y-4">
                     {draft.situation && (
-                      <Card>
-                        <CardContent className="pt-4">
+                      <Card className="py-0">
+                        <CardContent className="px-4 pb-4 pt-4">
                           <h4 className="font-medium text-sm mb-2">Situation</h4>
                           <p className="text-sm text-muted-foreground">{draft.situation}</p>
                         </CardContent>
                       </Card>
                     )}
                     {draft.task && (
-                      <Card>
-                        <CardContent className="pt-4">
+                      <Card className="py-0">
+                        <CardContent className="px-4 pb-4 pt-4">
                           <h4 className="font-medium text-sm mb-2">Task</h4>
                           <p className="text-sm text-muted-foreground">{draft.task}</p>
                         </CardContent>
                       </Card>
                     )}
                     {draft.action && (
-                      <Card>
-                        <CardContent className="pt-4">
+                      <Card className="py-0">
+                        <CardContent className="px-4 pb-4 pt-4">
                           <h4 className="font-medium text-sm mb-2">Action</h4>
                           <p className="text-sm text-muted-foreground">{draft.action}</p>
                         </CardContent>
                       </Card>
                     )}
                     {draft.result && (
-                      <Card>
-                        <CardContent className="pt-4">
+                      <Card className="py-0">
+                        <CardContent className="px-4 pb-4 pt-4">
                           <h4 className="font-medium text-sm mb-2">Result</h4>
                           <p className="text-sm text-muted-foreground">{draft.result}</p>
                         </CardContent>
@@ -270,8 +270,8 @@ export function ReviewContent({ attempt, draft }: { attempt: Attempt; draft: Dra
                     )}
                   </div>
                 ) : (
-                  <Card>
-                    <CardContent className="pt-4">
+                  <Card className="py-0">
+                    <CardContent className="px-4 pb-4 pt-4">
                       <p className="text-sm text-muted-foreground">No draft available for this question.</p>
                     </CardContent>
                   </Card>
